@@ -3,9 +3,13 @@
 //|                                            Copyright 2016, Lewis |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
+//| Version 1.04
+//|    1. Change the strategy of CheckForClose. Change CheckForClose(...)
+//|       to CheckForCloseOnTotalProfit(...). Add new function
+//|       CheckForCloseOnIndividualProfit(...), and it is called by default.
+//|    2. Change DURATION_DEFAULT from DURATION_DISABLE to DURATION_NOW.
 //| Version 1.03
 //|    1. fix bug
-//|    2. change LOT_WEIGHT_xx
 //| Version 1.02
 //|    1. Change Strategy:
 //|       Only send 1 order on 1 Bar, BUT check close condition in 
@@ -20,7 +24,7 @@
 
 #property copyright "Copyright 2016-2018, Lewis"
 #property link      "https://www.mql5.com"
-#property version   "1.03"
+#property version   "1.04"
 #property strict
 
 //--- input parameters
@@ -47,6 +51,8 @@ extern ENUM_APPLIED_PRICE PriceType = PRICE_OPEN;
 #define CROSSING_UNCROSSED_UP    64
 //Uncrossed, shortMA is below longMA
 #define CROSSING_UNCROSSED_DOWN 128
+#define CROSSING_UNCROSSED_IN_GOLD 256
+#define CROSSING_UNCROSSED_IN_DEAD 512
 
 //+-----------------------------+
 //+ ORDER WEIGHT DEFINITION     +
@@ -81,7 +87,7 @@ extern ENUM_APPLIED_PRICE PriceType = PRICE_OPEN;
 #define DURATION_WEEK    (60*24*7)
 #define DURATION_DISABLE  -1
 //NOTE: change DURATION_DEFAULT value to choose the profit strategy
-#define DURATION_DEFAULT  DURATION_DISABLE
+#define DURATION_DEFAULT  DURATION_NOW
 
 int last_t = 0; //only one order in one bar.
 
@@ -125,8 +131,10 @@ int CheckCross(int timeframe)
     if(last_s < last_l && s >= l) ret |= CROSSING_GOLD;
     if(last_s > last_l && s <= l) ret |= CROSSING_DEAD;
     
-    if(last_s > last_l && s > l) ret |= CROSSING_UNCROSSED_UP;
-    if(last_s < last_l && s < l) ret |= CROSSING_UNCROSSED_DOWN;
+    //if(last_s > last_l && s > l) ret |= CROSSING_UNCROSSED_UP;
+    //if(last_s < last_l && s < l) ret |= CROSSING_UNCROSSED_DOWN;
+    if (s >= l) ret |= CROSSING_UNCROSSED_IN_GOLD;
+    else ret |= CROSSING_UNCROSSED_IN_DEAD;
     
     //Print("timeframe=",timeframe, ", curS=",s,", lastS=", last_s, ", curL=",l,", lastL=",last_l, "==>RETURN:", ret);
     
@@ -178,11 +186,19 @@ double CalculateTotalProfit(int otype, int duration=DURATION_DEFAULT)
 //| Check for Close based on OP_TYPE (OP_BUY or OP_SELL)             
 //|   
 //+------------------------------------------------------------------+
-void CheckForClose(int otype, int duration=DURATION_DEFAULT)
+void CheckForCloseOnTotalProfit(int otype,  int duration=DURATION_DEFAULT)
 {
-    if (duration == DURATION_DISABLE ) return;
+    if (duration == DURATION_DISABLE ) {
+        Print("duration is set to DISABLE when CheckForClose, so do nothing.");
+        return;
+    }
     
-    if (CalculateTotalProfit(otype, duration)<= 0) return;
+    double profit = CalculateTotalProfit(otype, duration);
+    Print("Total Profit for Type:", otype, " is:", profit);
+    if (profit <= 0) {
+        Print("Total Profit for Type:", otype, " is negative,don't close any order!");
+        return;
+    }
     
     for (int i=0;i<OrdersTotal(); i++){
         if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES)==false) continue;
@@ -201,6 +217,32 @@ void CheckForClose(int otype, int duration=DURATION_DEFAULT)
     
 }
 
+//+------------------------------------------------------------------+
+//| Check for Close based on OP_TYPE (OP_BUY or OP_SELL)             
+//|   
+//+------------------------------------------------------------------+
+void CheckForCloseOnIndividualProfit(int otype,  int duration=DURATION_DEFAULT)
+{
+    if (duration == DURATION_DISABLE ) {
+        Print("duration is set to DISABLE when CheckForClose, so do nothing.");
+        return;
+    }
+    
+    for (int i=0;i<OrdersTotal(); i++){
+        if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES)==false) continue;
+        if(OrderMagicNumber()!=MAGICLEWIS || OrderSymbol()!=Symbol()) continue;
+        if(OrderType()== otype && (duration == DURATION_NOW || ((OrderOpenTime() - Time[0])/60 > duration)) && OrderProfit()>0.0){
+            if (otype == OP_BUY){
+                 if(!OrderClose(OrderTicket(),OrderLots(),Bid,3,Blue))
+                        Print("OrderClose error ",GetLastError());
+            }
+            if (otype == OP_SELL){
+                if(!OrderClose(OrderTicket(),OrderLots(),Ask,3,Violet))
+                        Print("OrderClose error ",GetLastError());
+            }
+        }
+    }
+}
 
 int start()
 {
@@ -226,7 +268,7 @@ int start()
         Print("GOLD CROSSING!");
         buy=1;
         //Check cross status in W1 chart: if short MA line is above long MA line
-        if(crossLong & (CROSSING_UNCROSSED_UP + CROSSING_GOLD) ){
+        if(crossLong & CROSSING_UNCROSSED_IN_GOLD ){
             if((crossShort & ORDER_WEIGHT_1) == ORDER_WEIGHT_1) lotRatio = LOT_WEIGHT_1;
             if((crossShort & ORDER_WEIGHT_2) == ORDER_WEIGHT_2) lotRatio = LOT_WEIGHT_2;
             if((crossShort & ORDER_WEIGHT_3) == ORDER_WEIGHT_3) lotRatio = LOT_WEIGHT_3;
@@ -243,7 +285,7 @@ int start()
         Print("DEAD CROSSING!");
         buy=-1;
         //Check cross status in W1 chart: if short MA line is above long MA line
-        if(crossLong & (CROSSING_UNCROSSED_UP+ CROSSING_GOLD)){
+        if(crossLong & CROSSING_UNCROSSED_IN_GOLD){
             if((crossShort & ORDER_WEIGHT_1) == ORDER_WEIGHT_1) lotRatio = LOT_WEIGHT_8;
             if((crossShort & ORDER_WEIGHT_2) == ORDER_WEIGHT_2) lotRatio = LOT_WEIGHT_7;
             if((crossShort & ORDER_WEIGHT_3) == ORDER_WEIGHT_3) lotRatio = LOT_WEIGHT_6;
@@ -276,7 +318,7 @@ int start()
         }
             
         //CLOSE SELL Orders
-        CheckForClose(OP_SELL);
+        CheckForCloseOnIndividualProfit(OP_SELL);
     }
     if (buy < 0) { //SELL
         Print("Meet SELL condition: lot=", lot, ",margin_ratio=",margin_ratio, ",currentBarTime=", Time[0]);
@@ -293,7 +335,7 @@ int start()
            }
         }
         //CLOSE BUY Orders
-        CheckForClose(OP_BUY);
+        CheckForCloseOnIndividualProfit(OP_BUY);
     }
     
     last_t = Time[0];
