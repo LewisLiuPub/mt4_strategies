@@ -3,19 +3,24 @@
 //|                                            Copyright 2016, Lewis |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
+//| Version 1.03
+//|    1. fix bug
+//|    2. change LOT_WEIGHT_xx
 //| Version 1.02
 //|    1. Change Strategy:
 //|       Only send 1 order on 1 Bar, BUT check close condition in 
-//|       every tick.
+//|       every tick. it is disabled by default. It can be enabled by
+//|       add parameter 'duration' when calling CheckForClose(), or
+//|       directly change macro DURATION_DEFAULT to any other value.
 //| Version 1.01
 //|    1. add checkForClose strategy
 //|    2. Add limitation for OrderSend, 
 //|         send order if AccountMargin/Equity < 30%
 //+------------------------------------------------------------------+
 
-#property copyright "Copyright 2016, Lewis"
+#property copyright "Copyright 2016-2018, Lewis"
 #property link      "https://www.mql5.com"
-#property version   "1.02"
+#property version   "1.03"
 #property strict
 
 //--- input parameters
@@ -53,11 +58,11 @@ extern ENUM_APPLIED_PRICE PriceType = PRICE_OPEN;
 #define ORDER_WEIGHT_4    (CROSSING_SHORTMA_DOWN | CROSSING_LONGMA_DOWN)
 
 //For Gold cross + W1 DOWN (shortMA < longMA)
-#define LOT_WEIGHT_1      10
-#define LOT_WEIGHT_2      7
-#define LOT_WEIGHT_3      7
-#define LOT_WEIGHT_4      5
-#define LOT_WEIGHT_5      5
+#define LOT_WEIGHT_1      5
+#define LOT_WEIGHT_2      4
+#define LOT_WEIGHT_3      4
+#define LOT_WEIGHT_4      3
+#define LOT_WEIGHT_5      3
 #define LOT_WEIGHT_6      2
 #define LOT_WEIGHT_7      2
 #define LOT_WEIGHT_8      1
@@ -71,11 +76,12 @@ extern ENUM_APPLIED_PRICE PriceType = PRICE_OPEN;
 //ShortMA line is below LongMA line
 #define DIRECTION_DOWN CROSSING_UNCROSSED_DOWN
 
-#define DURATION_NOW      -1
+#define DURATION_NOW      0
 #define DURATION_MONTH   (60*24*30)
 #define DURATION_WEEK    (60*24*7)
+#define DURATION_DISABLE  -1
 //NOTE: change DURATION_DEFAULT value to choose the profit strategy
-#define DURATION_DEFAULT  DURATION_NOW
+#define DURATION_DEFAULT  DURATION_DISABLE
 
 int last_t = 0; //only one order in one bar.
 
@@ -174,6 +180,8 @@ double CalculateTotalProfit(int otype, int duration=DURATION_DEFAULT)
 //+------------------------------------------------------------------+
 void CheckForClose(int otype, int duration=DURATION_DEFAULT)
 {
+    if (duration == DURATION_DISABLE ) return;
+    
     if (CalculateTotalProfit(otype, duration)<= 0) return;
     
     for (int i=0;i<OrdersTotal(); i++){
@@ -196,7 +204,6 @@ void CheckForClose(int otype, int duration=DURATION_DEFAULT)
 
 int start()
 {
-    double shortma, longma;
     int isCrossed = CROSSING_NONE;
     int crossShort = CheckCross(0);
     int crossLong = CheckCross(FindLongerTimeframe(0));
@@ -209,14 +216,17 @@ int start()
         return(0);
     }
     
-    //Print("timeframe:", PERIOD_CURRENT);
-    //Print("CrossShort=", crossShort);
-    //Print("crossLong=", crossLong);
+    if (last_t >= Time[0]){
+        //Print("The current bar has already been executed, do nothing!");
+        return(0);
+    }
+    
     //if gold cross occurs in D1 chart
     if(crossShort & CROSSING_GOLD){ //GOLD cross
+        Print("GOLD CROSSING!");
         buy=1;
         //Check cross status in W1 chart: if short MA line is above long MA line
-        if(crossLong & CROSSING_UNCROSSED_UP){
+        if(crossLong & (CROSSING_UNCROSSED_UP + CROSSING_GOLD) ){
             if((crossShort & ORDER_WEIGHT_1) == ORDER_WEIGHT_1) lotRatio = LOT_WEIGHT_1;
             if((crossShort & ORDER_WEIGHT_2) == ORDER_WEIGHT_2) lotRatio = LOT_WEIGHT_2;
             if((crossShort & ORDER_WEIGHT_3) == ORDER_WEIGHT_3) lotRatio = LOT_WEIGHT_3;
@@ -230,9 +240,10 @@ int start()
     } 
     
     if(crossShort & CROSSING_DEAD){ //DEAD cross 
+        Print("DEAD CROSSING!");
         buy=-1;
         //Check cross status in W1 chart: if short MA line is above long MA line
-        if(crossLong & CROSSING_UNCROSSED_UP){
+        if(crossLong & (CROSSING_UNCROSSED_UP+ CROSSING_GOLD)){
             if((crossShort & ORDER_WEIGHT_1) == ORDER_WEIGHT_1) lotRatio = LOT_WEIGHT_8;
             if((crossShort & ORDER_WEIGHT_2) == ORDER_WEIGHT_2) lotRatio = LOT_WEIGHT_7;
             if((crossShort & ORDER_WEIGHT_3) == ORDER_WEIGHT_3) lotRatio = LOT_WEIGHT_6;
@@ -251,16 +262,16 @@ int start()
     double margin_ratio = (double)AccountMargin()/AccountEquity();
     
     if (buy > 0) { //BUY
-        if (lot >= 0.01 && margin_ratio < 0.3 && Volume[0] < 1){
+        Print("Meet BUY condition: lot=", lot, ",margin_ratio=",margin_ratio, ",currentBarTime=", Time[0]);
+        if (margin_ratio < 0.3){
             ticket = OrderSend(Symbol(), OP_BUY, lot, Ask, 3, 0, 0, "autobuy DoubleMA", MAGICLEWIS,0, Green);
             if(ticket<0)
             {
                 Print("OrderSend for BUY failed with error #",GetLastError());
-                Print("lotRatio=", lotRatio, ",Lots=", lot);
             }
             else{
-               //Print("OrderSend for BUY placed successfully");
-               last_t = Time[0];
+               Print("OrderSend for BUY placed successfully");
+               //last_t = Time[0];
             }
         }
             
@@ -268,21 +279,23 @@ int start()
         CheckForClose(OP_SELL);
     }
     if (buy < 0) { //SELL
-        if (lot >= 0.01 && margin_ratio < 0.3 && Volume[0] < 1){
+        Print("Meet SELL condition: lot=", lot, ",margin_ratio=",margin_ratio, ",currentBarTime=", Time[0]);
+        if (margin_ratio < 0.3 ){
            ticket = OrderSend(Symbol(), OP_SELL, lot, Bid, 3, 0, 0, "autobuy DoubleMA", MAGICLEWIS,0, Red);
            if(ticket<0)
            {
                Print("OrderSend for SELL failed with error #",GetLastError());
-               Print("lotRatio=", lotRatio, ",Lots=", lot);
+               //Print("lotRatio=", lotRatio, ",Lots=", lot);
            }
            else{
-               //Print("OrderSend for SELL placed successfully");
-               last_t = Time[0];
+               Print("OrderSend for SELL placed successfully");
+               
            }
-        } 
+        }
         //CLOSE BUY Orders
         CheckForClose(OP_BUY);
     }
     
+    last_t = Time[0];
     return(0);
 }
