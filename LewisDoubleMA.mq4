@@ -15,7 +15,7 @@
 
 #property copyright "Copyright 2016, Lewis"
 #property link      "https://www.mql5.com"
-#property version   "1.01"
+#property version   "1.02"
 #property strict
 
 //--- input parameters
