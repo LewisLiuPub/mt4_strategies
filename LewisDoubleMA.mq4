@@ -12,19 +12,19 @@
 //|    1. fix bug
 //| Version 1.02
 //|    1. Change Strategy:
-//|       Only send 1 order on 1 Bar, BUT check close condition in 
+//|       Only send 1 order on 1 Bar, BUT check close condition in
 //|       every tick. it is disabled by default. It can be enabled by
 //|       add parameter 'duration' when calling CheckForClose(), or
 //|       directly change macro DURATION_DEFAULT to any other value.
 //| Version 1.01
 //|    1. add checkForClose strategy
-//|    2. Add limitation for OrderSend, 
+//|    2. Add limitation for OrderSend,
 //|         send order if AccountMargin/Equity < 30%
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2016-2018, Lewis"
 #property link      "https://www.mql5.com"
-#property version   "1.04"
+#property version   "1.05"
 #property strict
 
 //--- input parameters
@@ -96,14 +96,14 @@ int FindLongerTimeframe(int timeframe)
     //timeframes group supported by this code
     int timeframes[] = {0, 1, 5, 15, 30, 60, 240, 1440, 10080, 43200};
     int i = 0;
-    
+
     if(timeframe == 0) timeframe = Period();
-    
+
     for(;i<10;i++){
         if(timeframes[i] == timeframe) break;
     }
     i++;
-    
+
     return(timeframes[i]);
 }
 //+------------------------------------------------------------------+
@@ -117,7 +117,7 @@ int CheckCross(int timeframe)
 {
     double s, l, last_s, last_l; //MA data
     int ret = 0; //return value
-    
+
     s = iMA(NULL, timeframe, ShortMA, 0, MODE_SMA, PriceType, 0);
     l = iMA(NULL, timeframe, LongMA, 0, MODE_SMA, PriceType, 0);
     last_s = iMA(NULL, timeframe, ShortMA, 0, MODE_SMA, PriceType, 1);
@@ -127,18 +127,18 @@ int CheckCross(int timeframe)
     else ret |= CROSSING_SHORTMA_DOWN;
     if ( l >= last_l ) ret |= CROSSING_LONGMA_UP;
     else ret |= CROSSING_LONGMA_DOWN;
-    
+
     if(last_s < last_l && s >= l) ret |= CROSSING_GOLD;
     if(last_s > last_l && s <= l) ret |= CROSSING_DEAD;
-    
+
     //if(last_s > last_l && s > l) ret |= CROSSING_UNCROSSED_UP;
     //if(last_s < last_l && s < l) ret |= CROSSING_UNCROSSED_DOWN;
     if (s >= l) ret |= CROSSING_UNCROSSED_IN_GOLD;
     else ret |= CROSSING_UNCROSSED_IN_DEAD;
-    
+
     //Print("timeframe=",timeframe, ", curS=",s,", lastS=", last_s, ", curL=",l,", lastL=",last_l, "==>RETURN:", ret);
-    
-    
+
+
     return(ret);
 }
 
@@ -158,7 +158,7 @@ int CalculateCurrentOrders(string symbol)
          if(OrderType()==OP_SELL) sells++;
         }
      }
-     
+
    //--- return orders volume
    if(buys>0) return(buys);
    else       return(-sells);
@@ -178,13 +178,13 @@ double CalculateTotalProfit(int otype, int duration=DURATION_DEFAULT)
             total += OrderProfit();
         }
     }
-    
+
     return(total);
 }
 
 //+------------------------------------------------------------------+
-//| Check for Close based on OP_TYPE (OP_BUY or OP_SELL)             
-//|   
+//| Check for Close based on OP_TYPE (OP_BUY or OP_SELL)
+//|
 //+------------------------------------------------------------------+
 void CheckForCloseOnTotalProfit(int otype,  int duration=DURATION_DEFAULT)
 {
@@ -192,14 +192,14 @@ void CheckForCloseOnTotalProfit(int otype,  int duration=DURATION_DEFAULT)
         Print("duration is set to DISABLE when CheckForClose, so do nothing.");
         return;
     }
-    
+
     double profit = CalculateTotalProfit(otype, duration);
     Print("Total Profit for Type:", otype, " is:", profit);
     if (profit <= 0) {
         Print("Total Profit for Type:", otype, " is negative,don't close any order!");
         return;
     }
-    
+
     for (int i=0;i<OrdersTotal(); i++){
         if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES)==false) continue;
         if(OrderMagicNumber()!=MAGICLEWIS || OrderSymbol()!=Symbol()) continue;
@@ -214,12 +214,12 @@ void CheckForCloseOnTotalProfit(int otype,  int duration=DURATION_DEFAULT)
             }
         }
     }
-    
+
 }
 
 //+------------------------------------------------------------------+
-//| Check for Close based on OP_TYPE (OP_BUY or OP_SELL)             
-//|   
+//| Check for Close based on OP_TYPE (OP_BUY or OP_SELL)
+//|
 //+------------------------------------------------------------------+
 void CheckForCloseOnIndividualProfit(int otype,  int duration=DURATION_DEFAULT)
 {
@@ -227,20 +227,28 @@ void CheckForCloseOnIndividualProfit(int otype,  int duration=DURATION_DEFAULT)
         Print("duration is set to DISABLE when CheckForClose, so do nothing.");
         return;
     }
-    
-    for (int i=0;i<OrdersTotal(); i++){
+
+    for (int i=0;i<OrdersTotal(); ){
         if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES)==false) continue;
         if(OrderMagicNumber()!=MAGICLEWIS || OrderSymbol()!=Symbol()) continue;
+        Print("Checking Order:", OrderTicket(), ":symbol=", OrderSymbol(), ",magic=", OrderMagicNumber(), ",profit=", OrderProfit());
         if(OrderType()== otype && (duration == DURATION_NOW || ((OrderOpenTime() - Time[0])/60 > duration)) && OrderProfit()>0.0){
-            if (otype == OP_BUY){
-                 if(!OrderClose(OrderTicket(),OrderLots(),Bid,3,Blue))
-                        Print("OrderClose error ",GetLastError());
+            if (otype == OP_BUY && OrderClose(OrderTicket(),OrderLots(),Bid,3,Blue)){
+            //if successfully closing order, then check from beginning
+                i=0;
+                continue;
             }
-            if (otype == OP_SELL){
-                if(!OrderClose(OrderTicket(),OrderLots(),Ask,3,Violet))
-                        Print("OrderClose error ",GetLastError());
+            if (otype == OP_SELL && OrderClose(OrderTicket(),OrderLots(),Ask,3,Violet)){
+            //if successfully closing order, then check from beginning
+                i=0;
+                continue;
             }
+            i++;
+            Print("OrderClose error ",GetLastError());
+        }else{
+            i++;
         }
+
     }
 }
 
@@ -252,17 +260,17 @@ int start()
     int buy = 0;
     int lotRatio = 0;
     int ticket;
-    
+
     if( Bars < 100 ){
         Print("bar number is less than 100, do nothing!");
         return(0);
     }
-    
+
     if (last_t >= Time[0]){
         //Print("The current bar has already been executed, do nothing!");
         return(0);
     }
-    
+
     //if gold cross occurs in D1 chart
     if(crossShort & CROSSING_GOLD){ //GOLD cross
         Print("GOLD CROSSING!");
@@ -279,9 +287,9 @@ int start()
             if((crossShort & ORDER_WEIGHT_3) == ORDER_WEIGHT_3) lotRatio = LOT_WEIGHT_7;
             if((crossShort & ORDER_WEIGHT_4) == ORDER_WEIGHT_4) lotRatio = LOT_WEIGHT_8;
         }
-    } 
-    
-    if(crossShort & CROSSING_DEAD){ //DEAD cross 
+    }
+
+    if(crossShort & CROSSING_DEAD){ //DEAD cross
         Print("DEAD CROSSING!");
         buy=-1;
         //Check cross status in W1 chart: if short MA line is above long MA line
@@ -297,12 +305,12 @@ int start()
             if((crossShort & ORDER_WEIGHT_4) == ORDER_WEIGHT_4) lotRatio = LOT_WEIGHT_1;
         }
     }
-    
-    //ajudging Lot with the ratio of Account Equity. 
+
+    //ajudging Lot with the ratio of Account Equity.
     double lot= NormalizeDouble(BaseLots*lotRatio*AccountEquity()/10000, 2);
-    
+
     double margin_ratio = (double)AccountMargin()/AccountEquity();
-    
+
     if (buy > 0) { //BUY
         Print("Meet BUY condition: lot=", lot, ",margin_ratio=",margin_ratio, ",currentBarTime=", Time[0]);
         if (margin_ratio < 0.3){
@@ -316,7 +324,7 @@ int start()
                //last_t = Time[0];
             }
         }
-            
+
         //CLOSE SELL Orders
         CheckForCloseOnIndividualProfit(OP_SELL);
     }
@@ -331,13 +339,13 @@ int start()
            }
            else{
                Print("OrderSend for SELL placed successfully");
-               
+
            }
         }
         //CLOSE BUY Orders
         CheckForCloseOnIndividualProfit(OP_BUY);
     }
-    
+
     last_t = Time[0];
     return(0);
 }
