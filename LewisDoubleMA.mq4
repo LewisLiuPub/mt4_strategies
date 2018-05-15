@@ -3,6 +3,8 @@
 //|                                            Copyright 2016, Lewis |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
+//| Version 1.05
+//|    1. Remove checking Magic Number when closing orders.
 //| Version 1.04
 //|    1. Change the strategy of CheckForClose. Change CheckForClose(...)
 //|       to CheckForCloseOnTotalProfit(...). Add new function
@@ -152,7 +154,7 @@ int CalculateCurrentOrders(string symbol)
    for(int i=0;i<OrdersTotal();i++)
      {
       if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES)==false) break;
-      if(OrderSymbol()==Symbol() && OrderMagicNumber()==MAGICLEWIS)
+      if(OrderSymbol()==Symbol() /*&& OrderMagicNumber()==MAGICLEWIS*/)
         {
          if(OrderType()==OP_BUY)  buys++;
          if(OrderType()==OP_SELL) sells++;
@@ -173,7 +175,7 @@ double CalculateTotalProfit(int otype, int duration=DURATION_DEFAULT)
     double total = 0.0;
     for (int i=0;i<OrdersTotal(); i++){
         if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES)==false) continue;
-        if(OrderMagicNumber()!=MAGICLEWIS || OrderSymbol()!=Symbol()) continue;
+        if(/*OrderMagicNumber()!=MAGICLEWIS ||*/ OrderSymbol()!=Symbol()) continue;
         if(OrderType()== otype && (duration == DURATION_NOW || ((OrderOpenTime() - Time[0])/60 > duration))){
             total += OrderProfit();
         }
@@ -200,19 +202,20 @@ void CheckForCloseOnTotalProfit(int otype,  int duration=DURATION_DEFAULT)
         return;
     }
 
-    for (int i=0;i<OrdersTotal(); i++){
+    for (int i=0;i<OrdersTotal(); ){
         if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES)==false) continue;
-        if(OrderMagicNumber()!=MAGICLEWIS || OrderSymbol()!=Symbol()) continue;
+        if(/*OrderMagicNumber()!=MAGICLEWIS || */OrderSymbol()!=Symbol()) continue;
         if(OrderType()== otype && (duration == DURATION_NOW || ((OrderOpenTime() - Time[0])/60 > duration))){
-            if (otype == OP_BUY){
-                 if(!OrderClose(OrderTicket(),OrderLots(),Bid,3,Blue))
-                        Print("OrderClose error ",GetLastError());
+            if (otype == OP_BUY && OrderClose(OrderTicket(),OrderLots(),Bid,3,Blue)){
+                 continue;
             }
-            if (otype == OP_SELL){
-                if(!OrderClose(OrderTicket(),OrderLots(),Ask,3,Violet))
-                        Print("OrderClose error ",GetLastError());
+            if (otype == OP_SELL && OrderClose(OrderTicket(),OrderLots(),Ask,3,Violet)){
+                continue;
             }
+            Print("OrderClose error ",GetLastError());
         }
+        i++;
+
     }
 
 }
@@ -229,26 +232,19 @@ void CheckForCloseOnIndividualProfit(int otype,  int duration=DURATION_DEFAULT)
     }
 
     for (int i=0;i<OrdersTotal(); ){
-        if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES)==false) continue;
-        if(OrderMagicNumber()!=MAGICLEWIS || OrderSymbol()!=Symbol()) continue;
+        if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES)==false) {i++;continue;}
+        if(/*OrderMagicNumber()!=MAGICLEWIS ||*/ OrderSymbol()!=Symbol()){i++; continue;}
         Print("Checking Order:", OrderTicket(), ":symbol=", OrderSymbol(), ",magic=", OrderMagicNumber(), ",profit=", OrderProfit());
         if(OrderType()== otype && (duration == DURATION_NOW || ((OrderOpenTime() - Time[0])/60 > duration)) && OrderProfit()>0.0){
             if (otype == OP_BUY && OrderClose(OrderTicket(),OrderLots(),Bid,3,Blue)){
-            //if successfully closing order, then check from beginning
-                i=0;
-                continue;
+                 continue;
             }
             if (otype == OP_SELL && OrderClose(OrderTicket(),OrderLots(),Ask,3,Violet)){
-            //if successfully closing order, then check from beginning
-                i=0;
                 continue;
             }
-            i++;
             Print("OrderClose error ",GetLastError());
-        }else{
-            i++;
         }
-
+        i++;
     }
 }
 
